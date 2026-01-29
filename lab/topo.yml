@@ -1,3 +1,16 @@
+# Containerlab Topology: Virtual Switch Network Validation Lab
+# 
+# Topology:
+#   - sonic1 and sonic2: Linux switches with L2 bridges
+#   - ptfhost: PTF traffic generator with 4 test ports
+#
+# Connections:
+#   ptfhost:eth1 <-> sonic1:eth2  (VLAN100 access port 1)
+#   ptfhost:eth2 <-> sonic1:eth3  (VLAN100 access port 2)
+#   ptfhost:eth3 <-> sonic2:eth2  (VLAN100 access port 1)
+#   ptfhost:eth4 <-> sonic2:eth3  (VLAN100 access port 2)
+#   sonic1:eth1  <-> sonic2:eth1  (Inter-switch L3 routed link)
+
 name: sonic-lab
 
 topology:
@@ -15,9 +28,13 @@ topology:
       image: sonic-lab-ptfhost:latest
 
   links:
-    # sonic1:eth1 <--> sonic2:eth1 (inter-switch link)
+    # Inter-switch L3 link
     - endpoints: ["sonic1:eth1", "sonic2:eth1"]
-    # sonic1:eth2 <--> ptfhost:eth1 (test traffic port)
+    
+    # sonic1 L2 ports to ptfhost (for L2 forwarding tests)
     - endpoints: ["sonic1:eth2", "ptfhost:eth1"]
-    # sonic2:eth2 <--> ptfhost:eth2 (test traffic port)
-    - endpoints: ["sonic2:eth2", "ptfhost:eth2"]
+    - endpoints: ["sonic1:eth3", "ptfhost:eth2"]
+    
+    # sonic2 L2 ports to ptfhost (for L2 forwarding tests)
+    - endpoints: ["sonic2:eth2", "ptfhost:eth3"]
+    - endpoints: ["sonic2:eth3", "ptfhost:eth4"]

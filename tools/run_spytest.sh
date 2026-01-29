@@ -1,6 +1,6 @@
 #!/bin/bash
-# SPyTest Runner Script
-# Runs SPyTest-style control plane validation tests
+# Control-Plane Validation Runner
+# Runs Python-based control-plane checks (SPyTest-inspired, not actual sonic-mgmt)
 
 set -e
 
@@ -8,61 +8,56 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 REPORT_DIR="${PROJECT_DIR}/reports"
-ARTIFACT_DIR="${PROJECT_DIR}/artifacts/${TIMESTAMP}_spytest"
+ARTIFACT_DIR="${PROJECT_DIR}/artifacts/${TIMESTAMP}_ctrlplane"
 
 mkdir -p "$REPORT_DIR"
 mkdir -p "$ARTIFACT_DIR"
 
 echo "================================================"
-echo "SPyTest Runner - Static Routing Validation"
+echo "Control-Plane Validation"
 echo "================================================"
 echo "Timestamp: $TIMESTAMP"
 echo ""
 
-# Run the SPyTest
-python3 "${PROJECT_DIR}/tests/spytest/test_static_routing.py" 2>&1 | tee "${ARTIFACT_DIR}/spytest_output.log"
-SPYTEST_RESULT=${PIPESTATUS[0]}
+# Run the validation script
+python3 "${PROJECT_DIR}/tests/spytest/test_static_routing.py" 2>&1 | tee "${ARTIFACT_DIR}/ctrlplane_output.log"
+RESULT=${PIPESTATUS[0]}
 
 # Collect artifacts
 echo ""
 echo "Collecting artifacts..."
 docker exec clab-sonic-lab-sonic1 ip route > "${ARTIFACT_DIR}/sonic1_routes.txt" 2>&1 || true
 docker exec clab-sonic-lab-sonic2 ip route > "${ARTIFACT_DIR}/sonic2_routes.txt" 2>&1 || true
-docker exec clab-sonic-lab-sonic1 ip addr > "${ARTIFACT_DIR}/sonic1_interfaces.txt" 2>&1 || true
-docker exec clab-sonic-lab-sonic2 ip addr > "${ARTIFACT_DIR}/sonic2_interfaces.txt" 2>&1 || true
 
 # Generate report
 {
-    echo "# SPyTest Report - Static Routing Validation"
+    echo "# Control-Plane Validation Report"
     echo "Date: $(date)"
     echo ""
-    echo "## Test Result"
-    if [ $SPYTEST_RESULT -eq 0 ]; then
-        echo "**Status: ✅ ALL TESTS PASSED**"
+    echo "## Result"
+    if [ $RESULT -eq 0 ]; then
+        echo "**Status: ✅ ALL CHECKS PASSED**"
     else
-        echo "**Status: ❌ SOME TESTS FAILED**"
+        echo "**Status: ❌ SOME CHECKS FAILED**"
     fi
     echo ""
-    echo "## Test Cases"
-    echo "- TC01: Verify static routes on sonic1"
-    echo "- TC02: Verify static routes on sonic2"
-    echo "- TC03: Verify inter-switch connectivity"
-    echo "- TC04: Verify end-to-end reachability"
-    echo "- TC05: Verify route symmetry"
+    echo "## Checks Performed"
+    echo "- Static route installation on sonic1"
+    echo "- Static route installation on sonic2"  
+    echo "- Inter-switch L3 connectivity"
+    echo "- End-to-end reachability"
+    echo "- Route table symmetry"
     echo ""
     echo "## Artifacts"
-    echo "- Full output: ${ARTIFACT_DIR}/spytest_output.log"
-    echo "- Route tables: sonic1_routes.txt, sonic2_routes.txt"
-    echo "- Interfaces: sonic1_interfaces.txt, sonic2_interfaces.txt"
-} > "${REPORT_DIR}/spytest_report_${TIMESTAMP}.md"
+    echo "- Output: ${ARTIFACT_DIR}/ctrlplane_output.log"
+} > "${REPORT_DIR}/ctrlplane_report_${TIMESTAMP}.md"
 
 echo ""
 echo "================================================"
-echo "SPyTest Complete"
+echo "Control-Plane Validation Complete"
 echo "================================================"
-echo "Result: $([ $SPYTEST_RESULT -eq 0 ] && echo 'PASSED' || echo 'FAILED')"
-echo "Report: ${REPORT_DIR}/spytest_report_${TIMESTAMP}.md"
-echo "Logs:   ${ARTIFACT_DIR}/"
+echo "Result: $([ $RESULT -eq 0 ] && echo 'PASSED' || echo 'FAILED')"
+echo "Report: ${REPORT_DIR}/ctrlplane_report_${TIMESTAMP}.md"
 echo "================================================"
 
-exit $SPYTEST_RESULT
+exit $RESULT

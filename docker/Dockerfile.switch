@@ -5,10 +5,11 @@ RUN apt-get update && apt-get install -y \
     iputils-ping \
     net-tools \
     iptables \
+    ebtables \
     vlan \
     bridge-utils \
     tcpdump \
-    curl \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Enable 8021q VLAN module support

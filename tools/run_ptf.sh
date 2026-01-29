@@ -1,6 +1,6 @@
 #!/bin/bash
-# PTF Test Runner Script
-# Runs PTF tests inside the ptfhost container
+# PTF Test Runner
+# Runs dataplane validation tests using PTF framework
 
 set -e
 
@@ -17,24 +17,28 @@ echo "================================================"
 echo "PTF Test Runner"
 echo "================================================"
 echo "Timestamp: $TIMESTAMP"
-echo "Report Dir: $REPORT_DIR"
 echo ""
 
 # Copy test files to ptfhost
 echo "Copying PTF tests to ptfhost..."
 docker cp "${PROJECT_DIR}/tests/ptf/." clab-sonic-lab-ptfhost:/ptf_tests/
 
-# Configure ACL rules for testing
+# Configure ACL rule for deny test using ebtables (L2 filtering)
 echo ""
-echo "Configuring ACL rules on sonic1..."
-docker exec clab-sonic-lab-sonic1 iptables -C INPUT -p tcp --dport 9999 -j DROP 2>/dev/null || \
-    docker exec clab-sonic-lab-sonic1 iptables -A INPUT -p tcp --dport 9999 -j DROP
-echo "  - Added DROP rule for TCP port 9999"
+echo "Configuring ACL rules on sonic1 using ebtables..."
 
-# Show current iptables rules
+docker exec clab-sonic-lab-sonic1 bash -c '
+    # Use ebtables to filter at L2 level on the bridge
+    # Drop TCP dport 9999 packets on bridge
+    ebtables -L FORWARD 2>/dev/null | grep -q "9999" || \
+    ebtables -A FORWARD -p IPv4 --ip-proto tcp --ip-dport 9999 -j DROP
+'
+echo "  - ebtables DROP rule for TCP:9999 on FORWARD chain"
+
+# Show ebtables rules
 echo ""
-echo "Current iptables rules on sonic1:"
-docker exec clab-sonic-lab-sonic1 iptables -L INPUT -n -v --line-numbers
+echo "Current ebtables FORWARD rules:"
+docker exec clab-sonic-lab-sonic1 ebtables -L FORWARD --Lc 2>/dev/null || echo "(ebtables not available)"
 
 # Run PTF tests
 echo ""
@@ -43,7 +47,7 @@ echo "------------------------------------------------"
 
 # Test 1: VLAN Forwarding
 echo ""
-echo "[1/2] Running VLAN Forwarding Tests..."
+echo "[1/2] Running L2 Forwarding Tests..."
 docker exec -w /ptf_tests clab-sonic-lab-ptfhost ptf \
     --test-dir /ptf_tests \
     test_vlan_forwarding \
@@ -53,9 +57,9 @@ docker exec -w /ptf_tests clab-sonic-lab-ptfhost ptf \
 
 VLAN_RESULT=${PIPESTATUS[0]}
 
-# Test 2: ACL Smoke
+# Test 2: ACL
 echo ""
-echo "[2/2] Running ACL Smoke Tests..."
+echo "[2/2] Running ACL Tests..."
 docker exec -w /ptf_tests clab-sonic-lab-ptfhost ptf \
     --test-dir /ptf_tests \
     test_acl_smoke \
@@ -68,21 +72,14 @@ ACL_RESULT=${PIPESTATUS[0]}
 # Cleanup ACL rules
 echo ""
 echo "Cleaning up ACL rules..."
-docker exec clab-sonic-lab-sonic1 iptables -D INPUT -p tcp --dport 9999 -j DROP 2>/dev/null || true
+docker exec clab-sonic-lab-sonic1 ebtables -D FORWARD -p IPv4 --ip-proto tcp --ip-dport 9999 -j DROP 2>/dev/null || true
 
-# Collect additional artifacts
-echo ""
+# Collect artifacts
 echo "Collecting artifacts..."
 docker exec clab-sonic-lab-sonic1 bridge fdb show > "${ARTIFACT_DIR}/sonic1_fdb.txt" 2>&1 || true
-docker exec clab-sonic-lab-sonic1 ip route > "${ARTIFACT_DIR}/sonic1_routes.txt" 2>&1 || true
-docker exec clab-sonic-lab-sonic1 iptables -L -n -v > "${ARTIFACT_DIR}/sonic1_iptables.txt" 2>&1 || true
+docker exec clab-sonic-lab-sonic1 ebtables -L --Lc > "${ARTIFACT_DIR}/sonic1_ebtables.txt" 2>&1 || true
 
-# Generate summary report
-echo ""
-echo "================================================"
-echo "Test Summary"
-echo "================================================"
-
+# Generate report
 {
     echo "# PTF Test Report"
     echo "Date: $(date)"
@@ -90,36 +87,38 @@ echo "================================================"
     echo "## Results"
     echo ""
     if [ $VLAN_RESULT -eq 0 ]; then
-        echo "- ✅ VLAN Forwarding Tests: PASSED"
+        echo "- ✅ L2 Forwarding Tests: PASSED"
     else
-        echo "- ❌ VLAN Forwarding Tests: FAILED (exit code: $VLAN_RESULT)"
+        echo "- ❌ L2 Forwarding Tests: FAILED"
     fi
     if [ $ACL_RESULT -eq 0 ]; then
-        echo "- ✅ ACL Smoke Tests: PASSED"
+        echo "- ✅ ACL Tests: PASSED"
     else
-        echo "- ❌ ACL Smoke Tests: FAILED (exit code: $ACL_RESULT)"
+        echo "- ❌ ACL Tests: FAILED"
     fi
     echo ""
     echo "## Test Details"
     echo ""
-    echo "### VLAN Forwarding Tests"
-    echo "- VlanForwardingTest: L2 broadcast and unicast forwarding"
-    echo "- MacLearningTest: Bridge MAC address learning"
+    echo "### L2 Forwarding Tests"
+    echo "- BroadcastForwardingTest: verify_packet on broadcast flood"
+    echo "- UnicastForwardingTest: MAC learning + verify_packet on unicast"
+    echo "- NoFloodingToSourceTest: verify_no_packet on source port"
     echo ""
-    echo "### ACL Smoke Tests"
-    echo "- AclAllowTest: ICMP traffic permitted"
-    echo "- AclDenyTest: TCP port 9999 blocked via iptables"
-    echo "- AclPermitUdpTest: UDP traffic permitted"
+    echo "### ACL Tests"
+    echo "- AclAllowIcmpTest: ICMP forwarded (verify_packet)"
+    echo "- AclDenyTcpTest: TCP:9999 dropped via ebtables (verify_no_packet)"
+    echo "- AclAllowUdpTest: UDP forwarded (verify_packet)"
     echo ""
     echo "## Artifacts"
     echo "- Logs: artifacts/${TIMESTAMP}/"
-    echo "- FDB table: sonic1_fdb.txt"
-    echo "- Routes: sonic1_routes.txt"
-    echo "- iptables: sonic1_iptables.txt"
 } > "${REPORT_DIR}/ptf_report_${TIMESTAMP}.md"
 
-echo "VLAN Tests: $([ $VLAN_RESULT -eq 0 ] && echo 'PASSED' || echo 'FAILED')"
-echo "ACL Tests:  $([ $ACL_RESULT -eq 0 ] && echo 'PASSED' || echo 'FAILED')"
+echo ""
+echo "================================================"
+echo "Test Summary"
+echo "================================================"
+echo "L2 Forwarding: $([ $VLAN_RESULT -eq 0 ] && echo 'PASSED' || echo 'FAILED')"
+echo "ACL Tests:     $([ $ACL_RESULT -eq 0 ] && echo 'PASSED' || echo 'FAILED')"
 echo ""
 echo "Report: ${REPORT_DIR}/ptf_report_${TIMESTAMP}.md"
 echo "Logs:   ${ARTIFACT_DIR}/"

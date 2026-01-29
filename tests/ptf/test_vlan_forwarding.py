@@ -1,13 +1,13 @@
 """
-PTF Test: VLAN Forwarding and MAC Learning Smoke Test
+PTF Test: L2 Forwarding and MAC Learning Validation
 
-This test validates:
-1. L2 forwarding through a VLAN bridge
-2. MAC address learning on bridge ports
-3. Packet delivery between ptfhost and switch
+Topology (on sonic1):
+    ptfhost:eth1 (port 0) <-> sonic1:eth2 (br-vlan100)
+    ptfhost:eth2 (port 1) <-> sonic1:eth3 (br-vlan100)
 
-Topology:
-  ptfhost:eth1 (10.100.1.10) <---> sonic1:eth2 (br-vlan100, 10.100.1.1)
+Tests:
+    1. BroadcastForwardingTest: Send broadcast, verify it floods to other port
+    2. MacLearningTest: Learn MAC, then verify unicast goes to correct port
 """
 
 import ptf
@@ -18,62 +18,54 @@ from scapy.all import Ether, IP, ICMP, Raw
 import time
 
 
-class VlanForwardingTest(BaseTest):
-    """Test L2 forwarding through VLAN bridge"""
+class BroadcastForwardingTest(BaseTest):
+    """
+    Test: Broadcast frames should flood to all ports in the bridge.
+    
+    Send broadcast on port 0 (sonic1:eth2), expect to receive on port 1 (sonic1:eth3).
+    """
 
     def setUp(self):
         BaseTest.setUp(self)
-        # ptfhost eth1 = port 0, eth2 = port 1
         self.dataplane = ptf.dataplane_instance
         self.dataplane.flush()
-        
-        # Test parameters
-        self.src_mac = "00:11:22:33:44:55"
-        self.dst_mac = "ff:ff:ff:ff:ff:ff"  # Broadcast for ARP-like test
-        self.src_ip = "10.100.1.10"
-        self.dst_ip = "10.100.1.1"  # sonic1 bridge IP
         
     def tearDown(self):
         BaseTest.tearDown(self)
 
     def runTest(self):
-        """
-        Test 1: Send broadcast packet, verify it reaches the bridge
-        Test 2: Send unicast packet to bridge IP
-        """
-        print("\n=== Test: VLAN Forwarding ===")
+        print("\n=== Test: Broadcast Forwarding ===")
         
-        # Test 1: Broadcast packet
-        print("Sending broadcast packet on VLAN...")
-        pkt = Ether(src=self.src_mac, dst=self.dst_mac) / \
-              IP(src=self.src_ip, dst=self.dst_ip) / \
+        # Create broadcast frame
+        src_mac = "00:11:22:33:44:55"
+        dst_mac = "ff:ff:ff:ff:ff:ff"  # Broadcast
+        
+        pkt = Ether(src=src_mac, dst=dst_mac) / \
+              IP(src="10.100.1.100", dst="10.100.1.255") / \
               ICMP() / \
-              Raw(load="VLAN_TEST")
+              Raw(load="BROADCAST_TEST")
         
-        # Send on port 0 (eth1)
+        print(f"Sending broadcast frame on port 0")
+        print(f"  src_mac={src_mac}, dst_mac={dst_mac}")
+        
+        # Send on port 0, expect on port 1 (bridge floods broadcast)
         testutils.send_packet(self, 0, pkt)
         
-        # Allow time for processing
-        time.sleep(0.5)
+        # Verify packet arrives on port 1
+        print("Verifying packet received on port 1...")
+        testutils.verify_packet(self, pkt, port_id=1)
         
-        print("Broadcast packet sent successfully")
-        
-        # Test 2: Unicast ICMP packet
-        print("Sending unicast ICMP packet...")
-        unicast_pkt = Ether(src=self.src_mac, dst="02:fc:18:3a:e6:51") / \
-                      IP(src=self.src_ip, dst=self.dst_ip) / \
-                      ICMP(type=8) / \
-                      Raw(load="PING_TEST")
-        
-        testutils.send_packet(self, 0, unicast_pkt)
-        time.sleep(0.5)
-        
-        print("Unicast packet sent successfully")
-        print("=== VLAN Forwarding Test PASSED ===\n")
+        print("=== Broadcast Forwarding Test PASSED ===\n")
 
 
-class MacLearningTest(BaseTest):
-    """Test MAC address learning on bridge"""
+class UnicastForwardingTest(BaseTest):
+    """
+    Test: After MAC learning, unicast frames go to the correct port.
+    
+    Step 1: Send frame from port 1 to learn its MAC on sonic1
+    Step 2: Send unicast to that MAC from port 0
+    Step 3: Verify it arrives on port 1 (not flooded everywhere)
+    """
 
     def setUp(self):
         BaseTest.setUp(self)
@@ -84,27 +76,68 @@ class MacLearningTest(BaseTest):
         BaseTest.tearDown(self)
 
     def runTest(self):
-        """
-        Send packets with unique source MACs and verify bridge learns them
-        """
-        print("\n=== Test: MAC Learning ===")
+        print("\n=== Test: Unicast Forwarding with MAC Learning ===")
         
-        # Send packets with different source MACs
-        test_macs = [
-            "00:aa:bb:cc:dd:01",
-            "00:aa:bb:cc:dd:02", 
-            "00:aa:bb:cc:dd:03"
-        ]
+        # MAC addresses
+        mac_port0 = "00:aa:bb:cc:dd:01"  # Will send from port 0
+        mac_port1 = "00:aa:bb:cc:dd:02"  # Will send from port 1 to learn it
         
-        for i, src_mac in enumerate(test_macs):
-            pkt = Ether(src=src_mac, dst="ff:ff:ff:ff:ff:ff") / \
-                  IP(src=f"10.100.1.{100+i}", dst="10.100.1.1") / \
-                  ICMP() / \
-                  Raw(load=f"MAC_LEARN_{i}")
-            
-            testutils.send_packet(self, 0, pkt)
-            print(f"  Sent packet with MAC: {src_mac}")
-            time.sleep(0.2)
+        # Step 1: Learn mac_port1 by sending from port 1
+        print(f"Step 1: Learning MAC {mac_port1} on port 1")
+        learn_pkt = Ether(src=mac_port1, dst="ff:ff:ff:ff:ff:ff") / \
+                    IP(src="10.100.1.101", dst="10.100.1.255") / \
+                    ICMP() / \
+                    Raw(load="LEARN")
         
-        print("=== MAC Learning Test PASSED ===\n")
-        print("Note: Check 'bridge fdb show' on sonic1 to verify learned MACs")
+        testutils.send_packet(self, 1, learn_pkt)
+        time.sleep(0.5)  # Allow FDB to update
+        
+        # Flush receive buffers
+        self.dataplane.flush()
+        
+        # Step 2: Send unicast from port 0 to mac_port1
+        print(f"Step 2: Sending unicast from port 0 to {mac_port1}")
+        unicast_pkt = Ether(src=mac_port0, dst=mac_port1) / \
+                      IP(src="10.100.1.100", dst="10.100.1.101") / \
+                      ICMP() / \
+                      Raw(load="UNICAST_TEST")
+        
+        testutils.send_packet(self, 0, unicast_pkt)
+        
+        # Step 3: Verify packet arrives on port 1
+        print("Step 3: Verifying unicast arrives on port 1...")
+        testutils.verify_packet(self, unicast_pkt, port_id=1)
+        
+        print("=== Unicast Forwarding Test PASSED ===\n")
+
+
+class NoFloodingToSourceTest(BaseTest):
+    """
+    Test: Frames should NOT be sent back to the source port.
+    
+    Send from port 0, verify it does NOT come back on port 0.
+    """
+
+    def setUp(self):
+        BaseTest.setUp(self)
+        self.dataplane = ptf.dataplane_instance
+        self.dataplane.flush()
+        
+    def tearDown(self):
+        BaseTest.tearDown(self)
+
+    def runTest(self):
+        print("\n=== Test: No Flooding to Source Port ===")
+        
+        pkt = Ether(src="00:11:22:33:44:55", dst="ff:ff:ff:ff:ff:ff") / \
+              IP(src="10.100.1.100", dst="10.100.1.255") / \
+              ICMP() / \
+              Raw(load="NO_FLOOD_BACK")
+        
+        print("Sending broadcast on port 0, verifying no return on port 0")
+        testutils.send_packet(self, 0, pkt)
+        
+        # Should NOT receive on port 0 (source port)
+        testutils.verify_no_packet(self, pkt, port_id=0)
+        
+        print("=== No Flooding to Source Test PASSED ===\n")

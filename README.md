@@ -1,57 +1,69 @@
-# SONiC VS Lab + Network Validation Suite
+# Virtual Switch Network Validation Lab
 
-A reproducible virtual SONiC testbed with automated L2/L3 network validation using PTF and SPyTest-style testing frameworks.
+A containerlab-based network testbed demonstrating L2/L3 forwarding validation using PTF (Packet Test Framework). This project mirrors the validation patterns used in SONiC network testing.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20ARM64-lightgrey.svg)
+![Platform](https://img.shields.io/badge/platform-Linux%20ARM64%2Fx86__64-lightgrey.svg)
 ![Docker](https://img.shields.io/badge/docker-required-blue.svg)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 ## Overview
 
-This project demonstrates network validation skills relevant to SONiC NOS environments:
+This project demonstrates network validation skills relevant to switch/router testing:
 
-- **Virtual Testbed**: 2 virtual switches + 1 PTF traffic generator using containerlab
-- **L2 Validation**: VLAN forwarding, MAC learning, bridge operations
+- **Virtual Testbed**: 2 Linux switches + 1 PTF traffic generator using containerlab
+- **L2 Validation**: VLAN bridge forwarding, MAC learning, broadcast flooding
 - **L3 Validation**: Static routing, inter-switch connectivity
-- **ACL Testing**: Permit/deny rules validation using iptables
-- **Automated Testing**: PTF dataplane tests + SPyTest control plane tests
-- **Artifact Collection**: Automated log/config gathering and reporting
+- **ACL Testing**: L2 filtering with ebtables (permit/deny validation)
+- **Dataplane Testing**: PTF tests with `verify_packet` and `verify_no_packet` assertions
+- **Control-Plane Checks**: Python scripts validating route installation and connectivity
 
 ## Architecture
+                ┌─────────────────────┐
+                │      ptfhost        │
+                │   (PTF + Scapy)     │
+                │                     │
+                │ eth1 eth2 eth3 eth4 │
+                └──┬────┬────┬────┬───┘
+                   │    │    │    │
+     ┌─────────────┘    │    │    └─────────────┐
+     │                  │    │                  │
+     ▼                  ▼    ▼                  ▼
+┌─────────┐        ┌─────────┐            ┌─────────┐
+│ sonic1  │        │ sonic1  │            │ sonic2  │
+│  eth2   │        │  eth3   │            │eth2 eth3│
+│         │        │         │            │         │
+│    br-vlan100    │         │            │ br-vlan100
+│   (L2 bridge)    │         │            │(L2 bridge)
+│         │        │         │            │         │
+│  eth1   ├────────┴─────────┴────────────┤  eth1   │
+└─────────┘     10.0.0.1 <-> 10.0.0.2     └─────────┘
+                (L3 routed link)
+### Port Mappings
 
-                ┌─────────────┐
-                │   ptfhost   │
-                │  (PTF/Scapy)│
-                │ eth1   eth2 │
-                └──┬───────┬──┘
-                   │       │
-      10.100.1.x   │       │  10.100.2.x
-      (VLAN 100)   │       │  (VLAN 100)
-                   │       │
-                ┌──┴──┐ ┌──┴──┐
-                │sonic1│ │sonic2│
-                │      │ │      │
-                │ eth1 ├─┤ eth1 │
-                └──────┘ └──────┘
-                   10.0.0.1 ◄──► 10.0.0.2
-                     (L3 routed link)
+| PTF Port | ptfhost Interface | Connected To | Purpose |
+|----------|-------------------|--------------|---------|
+| 0 | eth1 | sonic1:eth2 | L2 test ingress |
+| 1 | eth2 | sonic1:eth3 | L2 test egress |
+| 2 | eth3 | sonic2:eth2 | L2 test (sonic2) |
+| 3 | eth4 | sonic2:eth3 | L2 test (sonic2) |
+
 ## Requirements
 
-- **Host OS**: Ubuntu 22.04 (ARM64 or x86_64)
-- **Docker Engine**: 20.10+
+- **OS**: Linux (Ubuntu 22.04 recommended)
+- **Docker**: 20.10+
 - **containerlab**: 0.40+
-- **Python**: 3.10+
-- **Memory**: 4GB+ recommended
-- **Disk**: 10GB+ free space
+- **Python**: 3.9+
+- **Memory**: 2GB+ available
+- **Architecture**: ARM64 or x86_64
 
-### For Apple Silicon Mac Users
+### Apple Silicon Mac Users
 
-This lab runs inside an Ubuntu VM using UTM. See [docs/apple-silicon-setup.md](docs/apple-silicon-setup.md) for detailed instructions.
+This lab runs inside an Ubuntu ARM64 VM. Use UTM to create an Ubuntu 22.04 VM, then install Docker and containerlab inside the VM.
 
-## Quick Start (10 minutes)
+## Quick Start
 
 ```bash
-# 1. Clone the repository
+# 1. Clone repository
 git clone https://github.com/yourusername/sonic-vs-lab.git
 cd sonic-vs-lab
 
@@ -61,7 +73,7 @@ make build
 # 3. Start the lab
 make up
 
-# 4. Configure networking
+# 4. Configure L2/L3 networking
 make config
 
 # 5. Run all tests
@@ -69,7 +81,7 @@ make test
 
 # 6. View results
 cat reports/ptf_report_*.md
-cat reports/spytest_report_*.md
+cat reports/ctrlplane_report_*.md
 
-# 7. Stop the lab when done
+# 7. Stop lab when done
 make down EOF
