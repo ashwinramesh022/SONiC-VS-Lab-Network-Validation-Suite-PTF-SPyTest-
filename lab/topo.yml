@@ -1,0 +1,23 @@
+name: sonic-lab
+
+topology:
+  nodes:
+    sonic1:
+      kind: linux
+      image: sonic-lab-switch:latest
+
+    sonic2:
+      kind: linux
+      image: sonic-lab-switch:latest
+
+    ptfhost:
+      kind: linux
+      image: sonic-lab-ptfhost:latest
+
+  links:
+    # sonic1:eth1 <--> sonic2:eth1 (inter-switch link)
+    - endpoints: ["sonic1:eth1", "sonic2:eth1"]
+    # sonic1:eth2 <--> ptfhost:eth1 (test traffic port)
+    - endpoints: ["sonic1:eth2", "ptfhost:eth1"]
+    # sonic2:eth2 <--> ptfhost:eth2 (test traffic port)
+    - endpoints: ["sonic2:eth2", "ptfhost:eth2"]

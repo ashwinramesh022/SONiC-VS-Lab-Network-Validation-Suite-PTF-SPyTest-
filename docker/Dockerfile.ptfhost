@@ -1,0 +1,16 @@
+FROM debian:bullseye
+
+RUN apt-get update && apt-get install -y \
+    iproute2 \
+    iputils-ping \
+    net-tools \
+    tcpdump \
+    python3 \
+    python3-pip \
+    python3-scapy \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PTF
+RUN pip3 install ptf
+
+CMD ["sleep", "infinity"]

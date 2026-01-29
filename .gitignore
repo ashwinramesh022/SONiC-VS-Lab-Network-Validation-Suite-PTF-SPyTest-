@@ -1,0 +1,25 @@
+# Containerlab state
+lab/clab-sonic-lab/
+
+# Artifacts (keep sample, ignore generated)
+artifacts/*/
+!artifacts/.gitkeep
+
+# Reports (keep sample, ignore generated)
+reports/ptf_report_*.md
+reports/spytest_report_*.md
+!reports/sample_report.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+*.swp
